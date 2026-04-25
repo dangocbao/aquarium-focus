@@ -426,14 +426,16 @@ function drawAquarium() {
     }
   }
 
-  // 2. Logic đẻ cá mới (Spawning Logic)
+ // 2. Logic đẻ cá mới (Spawning Logic)
   let dx = gaze.x - lastSpawnPos.x;
   let dy = gaze.y - lastSpawnPos.y;
   let dist = Math.sqrt(dx*dx + dy*dy);
   let timeSinceSpawn = now - lastSpawnTime;
-  let triggerDist = fishAssets[0] ? fishAssets[0].targetWidth : 50;
+  
+  // HACK: Giảm triggerDist xuống để cá dễ xuất hiện khi đứng yên
+  let triggerDist = 20; 
 
-  if ((dist > triggerDist || !isOverGrowingFish) && timeSinceSpawn > SPAWN_COOLDOWN) {
+  if ((dist > triggerDist || !currentHoverFish) && timeSinceSpawn > SPAWN_COOLDOWN) {
     let newFish = new Fish(gaze.x, gaze.y, fishAssets);
     activeFishes.push(newFish);
     currentHoverFish = newFish;
