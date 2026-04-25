@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Aquarium — Opening Ritual</title>
+<style>
+  /* ===== STYLING =====
+     Deep water gradient background and a soft italic title. */
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: radial-gradient(ellipse at center, #1a3a52 0%, #0a1929 100%);
+    font-family: Georgia, serif;
+    color: #e0f2fe;
+    cursor: none; /* hide the real cursor — we draw our own */
+  }
+ 
+  canvas {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+ 
+  #title {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 3rem;
+    font-style: italic;
+    letter-spacing: 0.2em;
+    color: #5e7a94;      /* muted slate-blue, feels "underwater" */
+    opacity: 0;
+    transition: opacity 1.2s ease-in-out;
+    pointer-events: none;
+    text-align: center;
+  }
+ 
+  #title.visible { opacity: 1; }
+</style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="title">breathe</div>
+ 
+<script>
+/* =====================================================
+   GIRL A'S CODE — Opening Ritual + Input
+   =====================================================
+   Sections:
+     1. THE SHARED CONTRACT (gaze variable)
+     2. CANVAS SETUP
+     3. CURSOR WIRING
+     4. TIMING KNOBS (tweak these!)
+     5. THE 4-DOT OPENING RITUAL
+     6. RENDER LOOP
+     7. PLACEHOLDER AQUARIUM  (Girl B replaces this tomorrow)
+     8. KICKOFF
+*/
+ 
+ 
+/* ----- 1. THE SHARED CONTRACT ----- */
+// This is THE most important line in the whole file.
+// Girl B and Girl D both read from this variable.
+// Today: cursor updates it. Tomorrow: gaze-glasses will update it instead.
+let gaze = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+let currentHeartRate = 75;
+ 
+/* ----- 2. CANVAS SETUP ----- */
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+ 
+window.addEventListener('resize', () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
+ 
+ 
+/* ----- 3. CURSOR WIRING ----- */
+// When the mouse moves, update gaze. That's the whole bridge.
+window.addEventListener('mousemove', (e) => {
+  gaze.x = e.clientX;
+  gaze.y = e.clientY;
+});
+ 
+ 
+/* ----- 3b. SEETRUE WIRING (optional) -----
+   If bridge.py is running, gaze comes from the glasses.
+   If not, the cursor wiring above keeps working as fallback.
+   The bridge sends normalized (0-1) coords; we multiply by window size. */
+/* ----- 3b. SEETRUE WIRING (optional) ----- */
+try {
+  const ws = new WebSocket('ws://localhost:8765');
+  ws.addEventListener('open',  () => console.log('✓ SeeTrue bridge connected'));
+  ws.addEventListener('error', () => console.log('No bridge — staying on cursor'));
+  ws.addEventListener('message', (event) => {
+    const data = JSON.parse(event.data);
+    gaze.x = data.nx * window.innerWidth;
+    gaze.y = data.ny * window.innerHeight;
+    
+    // Cập nhật nhịp tim từ bridge.py gửi sang (không có chữ 'let' ở trước)
+    if (data.heart_rate) {
+      currentHeartRate = data.heart_rate;
+    }
+  });
+} catch (e) { /* ignore, cursor still works */ }
+ 
+ 
+/* ----- 4. KNOBS ----- */
+// Tweak these to change the mood of the opening.
+const TITLE_HOLD_MS        = 2000;   // how long "breathe" stays visible
+const TITLE_FADE_OUT_MS    = 1000;
+const INSTRUCTION_HOLD_MS  = 2400;   // how long the instruction stays visible
+ 
+const DOT_FADE_IN_MS   = 400;
+const DOT_HOLD_MS      = 1200;
+const DOT_FADE_OUT_MS  = 400;
+const DOT_GAP_MS       = 200;    // pause between dots
+ 
+// Color of the calibration dots AND the gaze marker.
+// Kept red on purpose: SeeTrue's red gaze overlay lands on red targets,
+// so you can verify calibration just by checking they visually merge.
+const DOT_COLOR = '239, 68, 68';   // bright red (R, G, B)
+ 
+// Four corners, inset 60px from the edge.
+const INSET = 60;
+const dotPositions = [
+  { x: INSET, y: INSET },                                // top-left
+  { x: canvas.width - INSET, y: INSET },                 // top-right
+  { x: canvas.width - INSET, y: canvas.height - INSET }, // bottom-right
+  { x: INSET, y: canvas.height - INSET },                // bottom-left
+];
+ 
+ 
+/* ----- 5. THE 4-DOT OPENING RITUAL ----- */
+let phase = 'opening';   // 'opening' then 'aquarium'
+const activeDots = [];   // dots currently being rendered
+ 
+// Small helper: lets us write `await sleep(1000)` to pause.
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+ 
+async function runOpening() {
+  const title = document.getElementById('title');
+ 
+  // --- Step 1: "breathe" — set the mood ---
+  title.textContent = 'breathe';
+  title.classList.add('visible');
+  await sleep(TITLE_HOLD_MS);
+  title.classList.remove('visible');
+  await sleep(TITLE_FADE_OUT_MS);
+ 
+  // --- Step 2: instruction — tell the gazer what to do ---
+  title.textContent = 'follow each dot with your eyes';
+  title.classList.add('visible');
+  await sleep(INSTRUCTION_HOLD_MS);
+  title.classList.remove('visible');
+  await sleep(TITLE_FADE_OUT_MS);
+ 
+  // --- Step 3: four dots, one at a time ---
+  for (const pos of dotPositions) {
+    await showDot(pos);
+    await sleep(DOT_GAP_MS);
+  }
+ 
+  // --- Step 4: hand off to the aquarium ---
+  startAquarium();
+}
+ 
+async function showDot(pos) {
+  const dot = { x: pos.x, y: pos.y, startTime: Date.now() };
+  activeDots.push(dot);
+  await sleep(DOT_FADE_IN_MS + DOT_HOLD_MS + DOT_FADE_OUT_MS);
+  activeDots.splice(activeDots.indexOf(dot), 1);
+}
+ 
+ 
+/* ----- 6. RENDER LOOP -----
+   Runs 60 times per second. Redraws everything from scratch each frame.
+   Layer order matters: first drawn = bottom, last drawn = top. */
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+ 
+  drawWater();                                 // Girl D's layer (bottom)
+  for (const dot of activeDots) drawDot(dot);  // calibration dots
+  if (phase === 'aquarium') drawPlaceholder(); // Girl B's fish will replace this
+  drawGazeMarker();                            // gaze indicator (top)
+ 
+  requestAnimationFrame(render);
+}
+ 
+ 
+/* ----- 6b. WATER WORLD (Girl D's code goes here) -----
+   Called every frame, BEFORE fish are drawn (so water is the background layer).
+   You have access to: ctx, canvas.width, canvas.height, gaze.x, gaze.y.
+   Draw bubbles, caustics, currents, ripples — anything atmospheric. */
+/* ----- 6b. WATER WORLD (Girl D's code goes here) ----- */
+// Khai báo biến giữ trạng thái cho môi trường nước
+let waterTime = 0;
+let bubbles = [];
+
+function drawWater() {
+  // 1. Tính toán mức độ nhiễu loạn (Turbulence) từ Heart Rate
+  let hr_clamped = Math.max(60, Math.min(currentHeartRate, 150));
+  let turbulence = (hr_clamped - 60) / 40.0;
+  waterTime += 0.02 + (turbulence * 0.04);
+
+  // 2. Quản lý bong bóng (Sinh ra ngẫu nhiên)
+  if (Math.random() < (0.03 + turbulence * 0.05)) {
+    bubbles.push({
+      x: Math.random() * canvas.width,
+      y: canvas.height + Math.random() * 90 + 10,
+      radius: Math.random() * 4 + 2,
+      speedY: Math.random() * 1.5 + 1.0,
+      wobbleSpeed: Math.random() * 0.03 + 0.02,
+      time: Math.random() * 100
+    });
+  }
+
+  // Hàm vẽ sóng biển (Dịch từ _draw_wave của Python sang JS ctx)
+  function drawWaveLayer(amp, freq, phase, color, baseY) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    
+    // Kết hợp hàm Sin và Cos tạo độ cuộn
+    for (let x = 0; x <= canvas.width + 20; x += 20) {
+      let y = baseY + 
+              Math.sin(x * freq + waterTime * phase) * amp + 
+              Math.cos(x * freq * 0.6 + waterTime * phase * 0.8) * (amp * 0.4);
+      
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    // Kéo mảng màu bao trọn xuống đáy màn hình
+    ctx.lineTo(canvas.width, canvas.height);
+    ctx.lineTo(0, canvas.height);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  let amp_boost = turbulence * 20;
+
+  // Vẽ lớp sóng 1 (Biển sâu, tối màu)
+  drawWaveLayer(20 + amp_boost, 0.004, 1.0, 'rgba(0, 40, 80, 0.8)', canvas.height * 0.45);
+
+  // Cập nhật và vẽ bong bóng ở giữa các lớp sóng
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    let b = bubbles[i];
+    b.y -= b.speedY * (1.0 + turbulence);
+    b.time += b.wobbleSpeed;
+
+    let currX = b.x + Math.sin(b.time) * 15;
+
+    ctx.beginPath();
+    ctx.arc(currX, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Xóa bong bóng nếu nó nổi lên khỏi màn hình
+    if (b.y < -20) {
+      bubbles.splice(i, 1);
+    }
+  }
+
+  // Vẽ lớp sóng 2 (Giữa)
+  drawWaveLayer(25 + amp_boost * 1.5, 0.007, 1.5, 'rgba(0, 80, 130, 0.7)', canvas.height * 0.55);
+  // Vẽ lớp sóng 3 (Mặt nước sáng rực)
+  drawWaveLayer(15 + amp_boost * 0.8, 0.012, 2.2, 'rgba(0, 160, 200, 0.55)', canvas.height * 0.7);
+}
+ 
+function drawDot(dot) {
+  // Work out the opacity based on how long the dot has been on screen.
+  const elapsed = Date.now() - dot.startTime;
+  let opacity;
+  if (elapsed < DOT_FADE_IN_MS) {
+    opacity = elapsed / DOT_FADE_IN_MS;
+  } else if (elapsed < DOT_FADE_IN_MS + DOT_HOLD_MS) {
+    opacity = 1;
+  } else {
+    opacity = 1 - (elapsed - DOT_FADE_IN_MS - DOT_HOLD_MS) / DOT_FADE_OUT_MS;
+  }
+  opacity = Math.max(0, Math.min(1, opacity));
+ 
+  // Subtle pulse so the dot feels alive.
+  const pulse = Math.sin(elapsed / 180) * 0.15 + 0.9;
+ 
+  // Soft outer glow (red)
+  const glow = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, 50);
+  glow.addColorStop(0, `rgba(${DOT_COLOR}, ${opacity * 0.6})`);
+  glow.addColorStop(1, `rgba(${DOT_COLOR}, 0)`);
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(dot.x, dot.y, 50, 0, Math.PI * 2);
+  ctx.fill();
+ 
+  // Bright red core
+  ctx.fillStyle = `rgba(${DOT_COLOR}, ${opacity})`;
+  ctx.beginPath();
+  ctx.arc(dot.x, dot.y, 8 * pulse, 0, Math.PI * 2);
+  ctx.fill();
+}
+ 
+function drawGazeMarker() {
+  // Small red cursor so you can see where gaze is.
+  // Red so it matches SeeTrue's red overlay when you switch to glasses mode.
+  ctx.fillStyle = `rgba(${DOT_COLOR}, 0.7)`;
+  ctx.beginPath();
+  ctx.arc(gaze.x, gaze.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+ 
+ 
+/* ----- 7. PLACEHOLDER AQUARIUM -----
+   Girl B will replace this with her fish tomorrow.
+   For now, it just follows gaze with a soft glow + a note. */
+function startAquarium() {
+  phase = 'aquarium';
+  console.log('Aquarium started. gaze =', gaze);
+}
+ 
+function drawPlaceholder() {
+  const glow = ctx.createRadialGradient(gaze.x, gaze.y, 0, gaze.x, gaze.y, 80);
+  glow.addColorStop(0, 'rgba(125, 211, 252, 0.4)');
+  glow.addColorStop(1, 'rgba(125, 211, 252, 0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(gaze.x, gaze.y, 80, 0, Math.PI * 2);
+  ctx.fill();
+ 
+  ctx.fillStyle = 'rgba(224, 242, 254, 0.25)';
+  ctx.font = 'italic 18px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('🐟  the aquarium would begin here  🐟',
+               canvas.width / 2, canvas.height / 2);
+}
+ 
+ 
+/* ----- 8. KICKOFF ----- */
+render();       // start drawing
+runOpening();   // start the ritual
+</script>
+</body>
+</html>
