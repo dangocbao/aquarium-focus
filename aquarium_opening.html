@@ -187,17 +187,13 @@ function render() {
  
   drawWater();                                 // Girl D's layer (bottom)
   for (const dot of activeDots) drawDot(dot);  // calibration dots
-  if (phase === 'aquarium') drawPlaceholder(); // Girl B's fish will replace this
+  if (phase === 'aquarium') drawAquarium();    // ĐÃ SỬA: Gọi hàm vẽ cá của Girl B & C
   drawGazeMarker();                            // gaze indicator (top)
  
   requestAnimationFrame(render);
 }
  
  
-/* ----- 6b. WATER WORLD (Girl D's code goes here) -----
-   Called every frame, BEFORE fish are drawn (so water is the background layer).
-   You have access to: ctx, canvas.width, canvas.height, gaze.x, gaze.y.
-   Draw bubbles, caustics, currents, ripples — anything atmospheric. */
 /* ----- 6b. WATER WORLD (Girl D's code goes here) ----- */
 // Khai báo biến giữ trạng thái cho môi trường nước
 let waterTime = 0;
@@ -221,7 +217,7 @@ function drawWater() {
     });
   }
 
-  // Hàm vẽ sóng biển (Dịch từ _draw_wave của Python sang JS ctx)
+  // Hàm vẽ sóng biển 
   function drawWaveLayer(amp, freq, phase, color, baseY) {
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -242,10 +238,10 @@ function drawWater() {
     ctx.fill();
   }
 
-  let amp_boost = turbulence * 20;
+  let amp_boost = turbulence * 30; // Tăng nhẹ độ giật của sóng
 
-  // Vẽ lớp sóng 1 (Biển sâu, tối màu)
-  drawWaveLayer(20 + amp_boost, 0.004, 1.0, 'rgba(0, 40, 80, 0.8)', canvas.height * 0.45);
+  // Lớp 1: Biển sâu thẳm, bắt đầu từ tít trên cùng (Vượt ra ngoài màn hình một chút)
+  drawWaveLayer(80 + amp_boost, 0.002, 1.0, 'rgba(0, 40, 80, 0.8)', canvas.height * -0.2);
 
   // Cập nhật và vẽ bong bóng ở giữa các lớp sóng
   ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
@@ -260,16 +256,14 @@ function drawWater() {
     ctx.arc(currX, b.y, b.radius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Xóa bong bóng nếu nó nổi lên khỏi màn hình
-    if (b.y < -20) {
-      bubbles.splice(i, 1);
-    }
+    if (b.y < -20) bubbles.splice(i, 1);
   }
 
-  // Vẽ lớp sóng 2 (Giữa)
-  drawWaveLayer(25 + amp_boost * 1.5, 0.007, 1.5, 'rgba(0, 80, 130, 0.7)', canvas.height * 0.55);
-  // Vẽ lớp sóng 3 (Mặt nước sáng rực)
-  drawWaveLayer(15 + amp_boost * 0.8, 0.012, 2.2, 'rgba(0, 160, 200, 0.55)', canvas.height * 0.7);
+  // Lớp 2: Lớp sóng cuộn ở giữa màn hình, sóng to và dài
+  drawWaveLayer(90 + amp_boost * 1.5, 0.003, 1.5, 'rgba(0, 80, 130, 0.7)', canvas.height * 0.1);
+  
+  // Lớp 3: Dòng chảy phía trước, tạo ra các dải màu vắt ngang màn hình
+  drawWaveLayer(60 + amp_boost * 0.8, 0.005, 2.2, 'rgba(0, 160, 200, 0.55)', canvas.height * 0.3);
 }
  
 function drawDot(dot) {
@@ -313,29 +307,151 @@ function drawGazeMarker() {
   ctx.fill();
 }
  
- 
-/* ----- 7. PLACEHOLDER AQUARIUM -----
-   Girl B will replace this with her fish tomorrow.
-   For now, it just follows gaze with a soft glow + a note. */
+/* ----- 7. THE CREATURES & LIFE (Girl B & C's Code Translated) ----- */
+
+const GROWTH_RATE = 100;     // Thay cho 0.1s của Python
+const WIGGLE_INTENSITY = 3;
+const SPAWN_COOLDOWN = 200;  // Thay cho 0.2s của Python
+const NUM_FISH_IMAGES = 5;
+
+// Tải hình ảnh cá và tính toán tỷ lệ (Scale)
+let fishAssets = [];
+let baseSize = window.innerWidth / 20;
+
+for (let i = 0; i < NUM_FISH_IMAGES; i++) {
+  let img = new Image();
+  img.src = `assets/fish${i}.png`;
+  
+  // Tính kích thước giống hệt logic scale của Python
+  let size = baseSize + (i * (baseSize * 4 / (NUM_FISH_IMAGES - 1)));
+  img.targetWidth = size;
+  img.targetHeight = size / 2;
+  
+  fishAssets.push(img);
+}
+
+class Fish {
+  constructor(x, y, images) {
+    this.x = x;
+    this.y = y;
+    this.images = images;
+    this.stage = 0;
+    this.lastGrowthTime = Date.now();
+    this.isSwimmingAway = false;
+    this.velocity = Math.floor(Math.random() * 4) + 2; // Tốc độ từ 2-5
+    this.wiggleOffset = 0;
+    // Hướng bơi: 1 = bơi trái (flip), -1 = bơi phải
+    this.direction = Math.random() > 0.5 ? 1 : -1; 
+  }
+
+  update(gazePos) {
+    let now = Date.now();
+    let img = this.images[this.stage];
+    if (!img) return;
+
+    let w = img.targetWidth;
+    let h = img.targetHeight;
+
+    // Kiểm tra xem Gaze có nằm ngoài vùng của cá không (Collison)
+    let isInside = (gazePos.x >= this.x - w/2 && gazePos.x <= this.x + w/2 &&
+                    gazePos.y >= this.y - h/2 && gazePos.y <= this.y + h/2);
+
+    if (!isInside) {
+      this.isSwimmingAway = true;
+    }
+
+    if (!this.isSwimmingAway) {
+      // Logic phình to khi được nhìn vào
+      if (this.stage < this.images.length - 1) {
+        if (now - this.lastGrowthTime > GROWTH_RATE) {
+          this.stage++;
+          this.lastGrowthTime = now;
+        }
+      }
+    } else {
+      // Logic bơi đi và quẫy đuôi (wiggle)
+      this.x -= this.velocity * this.direction;
+      this.wiggleOffset = (Math.random() * WIGGLE_INTENSITY * 2) - WIGGLE_INTENSITY;
+    }
+  }
+
+  draw(ctx) {
+    let img = this.images[this.stage];
+    if (!img || !img.complete) return;
+
+    ctx.save();
+    ctx.translate(this.x, this.y + this.wiggleOffset);
+    // Lật hình ảnh cá nếu đang bơi sang trái
+    if (this.direction === 1) {
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(img, -img.targetWidth/2, -img.targetHeight/2, img.targetWidth, img.targetHeight);
+    ctx.restore();
+  }
+
+  isOffScreen() {
+    return this.x > window.innerWidth + 200 || this.x < -200;
+  }
+}
+
+// Quản lý trạng thái bầy cá
+let activeFishes = [];
+let lastSpawnPos = {x: 0, y: 0};
+let lastSpawnTime = 0;
+let currentHoverFish = null;
+
 function startAquarium() {
   phase = 'aquarium';
-  console.log('Aquarium started. gaze =', gaze);
+  console.log('Aquarium started with translated Python logic.');
 }
- 
-function drawPlaceholder() {
-  const glow = ctx.createRadialGradient(gaze.x, gaze.y, 0, gaze.x, gaze.y, 80);
-  glow.addColorStop(0, 'rgba(125, 211, 252, 0.4)');
-  glow.addColorStop(1, 'rgba(125, 211, 252, 0)');
-  ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(gaze.x, gaze.y, 80, 0, Math.PI * 2);
-  ctx.fill();
- 
-  ctx.fillStyle = 'rgba(224, 242, 254, 0.25)';
-  ctx.font = 'italic 18px Georgia, serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('🐟  the aquarium would begin here  🐟',
-               canvas.width / 2, canvas.height / 2);
+
+function drawAquarium() {
+  let now = Date.now();
+  let isOverGrowingFish = false;
+
+  // 1. Kiểm tra xem có đang nhìn vào con cá hiện tại không
+  if (currentHoverFish) {
+    let img = currentHoverFish.images[currentHoverFish.stage];
+    if (img) {
+      let w = img.targetWidth;
+      let h = img.targetHeight;
+      let isInside = (gaze.x >= currentHoverFish.x - w/2 && gaze.x <= currentHoverFish.x + w/2 &&
+                      gaze.y >= currentHoverFish.y - h/2 && gaze.y <= currentHoverFish.y + h/2);
+      if (isInside) {
+        isOverGrowingFish = true;
+      } else {
+        currentHoverFish.isSwimmingAway = true;
+        currentHoverFish = null;
+      }
+    }
+  }
+
+  // 2. Logic đẻ cá mới (Spawning Logic)
+  let dx = gaze.x - lastSpawnPos.x;
+  let dy = gaze.y - lastSpawnPos.y;
+  let dist = Math.sqrt(dx*dx + dy*dy);
+  let timeSinceSpawn = now - lastSpawnTime;
+  let triggerDist = fishAssets[0] ? fishAssets[0].targetWidth : 50;
+
+  if ((dist > triggerDist || !isOverGrowingFish) && timeSinceSpawn > SPAWN_COOLDOWN) {
+    let newFish = new Fish(gaze.x, gaze.y, fishAssets);
+    activeFishes.push(newFish);
+    currentHoverFish = newFish;
+    lastSpawnPos = {x: gaze.x, y: gaze.y};
+    lastSpawnTime = now;
+  }
+
+  // 3. Cập nhật và vẽ bầy cá
+  for (let i = activeFishes.length - 1; i >= 0; i--) {
+    let f = activeFishes[i];
+    f.update(gaze);
+    f.draw(ctx);
+    
+    // Xóa cá nếu bơi ra khỏi màn hình
+    if (f.isOffScreen()) {
+      activeFishes.splice(i, 1);
+    }
+  }
 }
  
  
